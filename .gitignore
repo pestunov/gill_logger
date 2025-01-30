@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# my secure
+my_secure.py
+
 # C extensions
 *.so
 
