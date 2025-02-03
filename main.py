@@ -45,8 +45,8 @@ def float_or_null(val):
 if __name__ == '__main__':
     columns = ['Q',
                'WindDir', 'WindSpeed',
-               'WindDirCor',  # 'WindSpeedCor',
-               'Longitude', 'Latitude',  # 'Altitude',
+               'WindDirCor', 'WindSpeedCor',
+               'Latitude', 'Longitude', 'Altitude',
                'DateTime',
                'Vss', 'Status',
                ]
@@ -57,24 +57,30 @@ if __name__ == '__main__':
     while 1:
         with serial.Serial('COM1', 19200, timeout=1) as ser:
             serialLine = ser.readline()
-            # print(serialLine)
             serialLine = handle_serial_line(serialLine)
             if serialLine is not None:
                 isData = True
                 serialLine = serialLine.strip(',')
                 data = serialLine.split(',')
-                # print(data)
+                # data[5] is joined with ":" like here: "+56.478236:+085.054112:+0177.00"
+                data.insert(6, '')
+                data.insert(6, '')
+                if data[5] != '':
+                    subdata = data[5].split(':')
+                    data[5] = subdata[0]
+                    data[6] = subdata[1]
+                    data[7] = subdata[2]
                 df.loc[len(df), :] = data
 
         t = dt.now()
-# collect data for the period PERIOD_DATA_STORE and handle in with half shift
+        # collect data for the period PERIOD_DATA_STORE and handle in with half shift
         if isData and t.second == 0 and t.minute in range(int(PERIOD_DATA_STORE/2), 61, PERIOD_DATA_STORE):
             isData = False
 
             # handle data array. write data to db
             df['DateTime'] = pd.to_datetime(df['DateTime'], yearfirst=True)
             # translate string to numeric
-            cols = ['WindDir', 'WindSpeed', 'WindDirCor', 'Longitude', 'Latitude', 'Vss']
+            cols = ['WindDir', 'WindSpeed', 'WindDirCor', 'WindSpeedCor', 'Longitude', 'Latitude', 'Altitude', 'Vss']
             for col in cols:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
@@ -87,18 +93,20 @@ if __name__ == '__main__':
             windDir = float_or_null(np.rad2deg(np.arctan2(dx, dy)))
 
             # calculate average corrected wind direction
-            df['dx'] = np.sin(np.radians(df['WindDirCor'])) * df['WindSpeed']
-            df['dy'] = np.cos(np.radians(df['WindDirCor'])) * df['WindSpeed']
+            df['dx'] = np.sin(np.radians(df['WindDirCor'])) * df['WindSpeedCor']
+            df['dy'] = np.cos(np.radians(df['WindDirCor'])) * df['WindSpeedCor']
             dx = df['dx'].mean()
             dy = df['dy'].mean()
+            windSpeedCor = float_or_null(np.sqrt(dx * dx + dy * dy))
             windDirCor = float_or_null(np.rad2deg(np.arctan2(dx, dy)))
 
             latitude = float_or_null(df['Latitude'].mean())
             longitude = float_or_null(df['Longitude'].mean())
+            altitude = float_or_null(df['Altitude'].mean())
             vss = float_or_null(df['Vss'].mean())
             dateTimeGill = df['DateTime'].mean().strftime('"%Y-%m-%d %H-%M-%S"')
             dateTime = (t - pd.to_timedelta(f'{PERIOD_DATA_STORE / 2}m')).strftime('"%Y-%m-%d %H-%M-%S"')
-# clear df
+            # clear df
             df = pd.DataFrame(columns=columns)
 
             # make result dictionary
@@ -106,19 +114,21 @@ if __name__ == '__main__':
                    'DateTimeGill': dateTimeGill,
                    'Longitude': longitude,
                    'Latitude': latitude,
+                   'Altitude': altitude,
                    'WindSpeed': windSpeed,
                    'WindDir': windDir,
+                   'WindSpeedCor': windSpeedCor,
                    'WindDirCor': windDirCor,
                    'Vss': vss,
                    }
+
             print(res)
 
-            tableName = 'table1'
-            cols = f'({", ".join([str(k) for k in res.keys()])})'
-            vals = f'({", ".join([str(v) for v in res.values()])})'
-            print(cols)
-            print(vals)
+            tableName = 'table'
+            cols = f'{", ".join([str(k) for k in res.keys()])}'
+            vals = f'{", ".join([str(v) for v in res.values()])}'
 
+            print(cols, vals)
             with db.connect(host=ms.db_host,
                             user=ms.db_user,
                             password=ms.db_password,
@@ -126,6 +136,6 @@ if __name__ == '__main__':
                             db='baikal',) as con:
                 cur = con.cursor()
 
-                request = f'insert into {tableName} {cols} values {vals};'
+                request = f'insert into `{tableName}` ({cols}) values ({vals});'
                 print(request)
                 cur.execute(request)
