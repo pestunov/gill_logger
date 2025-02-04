@@ -6,7 +6,8 @@ import pymysql as db
 
 import my_secure as ms
 
-PERIOD_DATA_STORE = 10  # in minutes
+PERIOD_DATA_STORE = 5  # in minutes
+TABLE_NAME = 'table2'
 
 
 def get_control_sum(line):
@@ -41,6 +42,10 @@ def float_or_null(val):
     return float(val) if val == val else 'NULL'
 
 
+def degree_to_positive(angle):
+    return angle if angle >= 0 else (360 + angle)
+
+
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     columns = ['Q',
@@ -71,10 +76,11 @@ if __name__ == '__main__':
                     data[6] = subdata[1]
                     data[7] = subdata[2]
                 df.loc[len(df), :] = data
+                print(data)
 
         t = dt.now()
         # collect data for the period PERIOD_DATA_STORE and handle in with half shift
-        if isData and t.second == 0 and t.minute in range(int(PERIOD_DATA_STORE/2), 61, PERIOD_DATA_STORE):
+        if isData and t.second == 0 and t.minute in range(0, 61, PERIOD_DATA_STORE):
             isData = False
 
             # handle data array. write data to db
@@ -91,6 +97,10 @@ if __name__ == '__main__':
             dy = df['dy'].mean()
             windSpeed = float_or_null(np.sqrt(dx * dx + dy * dy))
             windDir = float_or_null(np.rad2deg(np.arctan2(dx, dy)))
+            windDir = degree_to_positive(windDir)
+            windSpeedMax = df['WindSpeed'].max()
+            windDirMax = df.loc[df['WindSpeed'] == windSpeedMax, 'WindDir'].min()
+            windDirMax = degree_to_positive(windDirMax)
 
             # calculate average corrected wind direction
             df['dx'] = np.sin(np.radians(df['WindDirCor'])) * df['WindSpeedCor']
@@ -99,13 +109,18 @@ if __name__ == '__main__':
             dy = df['dy'].mean()
             windSpeedCor = float_or_null(np.sqrt(dx * dx + dy * dy))
             windDirCor = float_or_null(np.rad2deg(np.arctan2(dx, dy)))
+            windDirCor = degree_to_positive(windDirCor)
+            windSpeedCorMax = df['WindSpeedCor'].max()
+            windDirCorMax = df.loc[df['WindSpeedCor'] == windSpeedCorMax, 'WindDirCor'].min()
+            windDirCorMax = degree_to_positive(windDirCorMax)
 
             latitude = float_or_null(df['Latitude'].mean())
             longitude = float_or_null(df['Longitude'].mean())
             altitude = float_or_null(df['Altitude'].mean())
             vss = float_or_null(df['Vss'].mean())
             dateTimeGill = df['DateTime'].mean().strftime('"%Y-%m-%d %H-%M-%S"')
-            dateTime = (t - pd.to_timedelta(f'{PERIOD_DATA_STORE / 2}m')).strftime('"%Y-%m-%d %H-%M-%S"')
+            # dateTime = (t - pd.to_timedelta(f'{PERIOD_DATA_STORE / 2}m')).strftime('"%Y-%m-%d %H-%M-%S"')
+            dateTime = t.strftime('"%Y-%m-%d %H-%M-%S"')
             # clear df
             df = pd.DataFrame(columns=columns)
 
@@ -117,18 +132,19 @@ if __name__ == '__main__':
                    'Altitude': altitude,
                    'WindSpeed': windSpeed,
                    'WindDir': windDir,
+                   'WindSpeedMax': windSpeedMax,
+                   'WindDirMax': windDirMax,
                    'WindSpeedCor': windSpeedCor,
                    'WindDirCor': windDirCor,
+                   'WindSpeedCorMax': windSpeedCorMax,
+                   'WindDirCorMax': windDirCorMax,
                    'Vss': vss,
                    }
-
             print(res)
 
-            tableName = 'table'
             cols = f'{", ".join([str(k) for k in res.keys()])}'
             vals = f'{", ".join([str(v) for v in res.values()])}'
 
-            print(cols, vals)
             with db.connect(host=ms.db_host,
                             user=ms.db_user,
                             password=ms.db_password,
@@ -136,6 +152,6 @@ if __name__ == '__main__':
                             db='baikal',) as con:
                 cur = con.cursor()
 
-                request = f'insert into `{tableName}` ({cols}) values ({vals});'
+                request = f'insert into `{TABLE_NAME}` ({cols}) values ({vals});'
                 print(request)
                 cur.execute(request)
